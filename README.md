@@ -21,6 +21,8 @@ Airlock is a modern, clean interface designed for air-gapped (SCIF) environments
 
 ## 🛠️ Developer Guide
 
+> **Deployment:** For a step-by-step guide on turning this codebase into a standalone executable (using Electron), please read [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ### 1. Architecture
 The app follows a "Zero Trust" frontend architecture:
 *   **Frontend**: React + Tailwind (UI).
