@@ -1,0 +1,5 @@
+{
+  "name": "Airlock UI",
+  "description": "A secure, offline-first styled chat interface for interacting with Local LLMs and modifying JSON configurations.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,8 @@
+This is the directory where you should place your Local LLM files.
+
+Supported Format: .gguf
+Recommended Models:
+- Llama-3-8B-Instruct.gguf
+- Mistral-7B-Instruct.gguf
+
+The application will automatically scan this folder on startup and populate the dropdown menu in the Top Bar.
