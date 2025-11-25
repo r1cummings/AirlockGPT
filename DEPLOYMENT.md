@@ -1,174 +1,80 @@
-# Deployment Guide: From React to SCIF Executable
+# Deployment Guide: SCIF Executable
 
-This guide explains how to wrap the current React Frontend into a standalone `.exe` using **Electron**. 
+This repository now includes the full **Electron Backend** in the `electron/` folder. You do not need to write code. You only need to install dependencies and build.
 
-Since this app relies on `window.electron` to function, you must create an Electron "Main Process" that handles the actual file scanning and LLM inference.
+## 1. Prerequisites
+You need **Node.js** (v18 or higher) and **Python** (for building the llama.cpp bindings).
 
-## 1. Project Structure Setup
+## 2. Setup
 
-You will need to reorganize your project slightly to support Electron.
-
-```text
-/my-secure-chat
-  ├── /src                # (The current React code)
-  ├── /electron           # (NEW: Electron backend logic)
-  │   ├── main.js
-  │   └── preload.js
-  ├── /models             # (Where .gguf files go)
-  ├── package.json
-  └── tsconfig.json
-```
-
-## 2. Install Dependencies
-
-You need Electron and a library to run GGUF models (like `node-llama-cpp` or a Python sidecar).
-
-```bash
-npm install --save-dev electron electron-builder concurrently wait-on
-npm install node-llama-cpp fs-extra
-```
-
-## 3. Create the Electron Bridge
-
-You need two files to make `window.electron` work.
-
-### A. `electron/preload.js`
-This injects the secure bridge into the browser window.
-
-```javascript
-const { contextBridge, ipcRenderer } = require('electron');
-
-contextBridge.exposeInMainWorld('electron', {
-  listModels: () => ipcRenderer.invoke('list-models'),
-  generateResponse: (payload) => ipcRenderer.invoke('generate-response', payload),
-});
-```
-
-### B. `electron/main.js`
-This is the "Backend" that runs on the user's machine.
-
-```javascript
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const { LlamaModel, LlamaContext, LlamaChatSession } = require('node-llama-cpp');
-
-// Determine path to /models (handle dev vs prod)
-const isDev = process.env.NODE_ENV === 'development';
-const modelsPath = isDev 
-  ? path.join(__dirname, '../models') 
-  : path.join(process.resourcesPath, 'models');
-
-let mainWindow;
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false, // Security: Keep true isolation
-      contextIsolation: true,
-    },
-    autoHideMenuBar: true,
-    backgroundColor: '#0c0c0e'
-  });
-
-  // Load React App
-  const startUrl = isDev 
-    ? 'http://localhost:3000' 
-    : `file://${path.join(__dirname, '../build/index.html')}`;
-  
-  mainWindow.loadURL(startUrl);
-}
-
-// --- IPC HANDLERS (The Implementation of your Interface) ---
-
-// 1. List Models
-ipcMain.handle('list-models', async () => {
-  if (!fs.existsSync(modelsPath)) return [];
-  
-  const files = fs.readdirSync(modelsPath);
-  return files
-    .filter(f => f.endsWith('.gguf'))
-    .map(f => {
-      const stats = fs.statSync(path.join(modelsPath, f));
-      return {
-        id: f,
-        name: f.replace('.gguf', ''),
-        size: (stats.size / (1024 * 1024 * 1024)).toFixed(2) + ' GB',
-        path: path.join(modelsPath, f),
-        quantization: 'User Provided'
-      };
-    });
-});
-
-// 2. Generate Response (Inference)
-ipcMain.handle('generate-response', async (event, payload) => {
-  const { modelPath, messages, systemInstruction } = payload;
-  
-  // Initialize the specific model requested
-  const model = new LlamaModel({ modelPath: path.join(modelsPath, modelPath) });
-  const context = new LlamaContext({ model });
-  const session = new LlamaChatSession({ context, systemPrompt: systemInstruction });
-
-  // Convert chat history to simple string or proper format
-  // Note: node-llama-cpp handles history internally in session, 
-  // but you might need to feed previous context here depending on library version.
-  
-  const lastUserMessage = messages[messages.length - 1].content;
-  const response = await session.prompt(lastUserMessage);
-  
-  return response;
-});
-
-app.whenReady().then(createWindow);
-```
-
-## 4. Configure `package.json` for Building
-
-You need to tell `electron-builder` to include the `/models` folder as an "extra resource" so it sits *outside* the packed `.exe` (allowing users to add files).
+Add the following to your `package.json` (create one if missing):
 
 ```json
 {
+  "name": "airlock-ui",
+  "version": "1.0.0",
   "main": "electron/main.js",
+  "scripts": {
+    "start": "concurrently \"react-scripts start\" \"wait-on http://localhost:3000 && electron .\"",
+    "build": "react-scripts build",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "lucide-react": "^0.263.1",
+    "react-markdown": "^8.0.7",
+    "react-syntax-highlighter": "^15.5.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "electron": "^26.0.0",
+    "electron-builder": "^24.6.3",
+    "node-llama-cpp": "^2.6.0", 
+    "concurrently": "^8.2.0",
+    "wait-on": "^7.0.1"
+  },
   "build": {
-    "appId": "com.secure.chat",
-    "productName": "SecureChat",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "build/**/*", 
-      "electron/**/*"
-    ],
+    "appId": "com.secure.airlock",
+    "files": ["build/**/*", "electron/**/*"],
     "extraResources": [
       {
         "from": "models",
         "to": "models",
         "filter": ["**/*"]
       }
-    ],
-    "win": {
-      "target": "nsis"
-    }
-  },
-  "scripts": {
-    "react-start": "react-scripts start",
-    "react-build": "react-scripts build",
-    "electron-start": "wait-on http://localhost:3000 && electron .",
-    "dev": "concurrently \"npm run react-start\" \"npm run electron-start\"",
-    "dist": "npm run react-build && electron-builder"
+    ]
   }
 }
 ```
 
-## 5. Build It
+> **Note on node-llama-cpp**: This library compiles `llama.cpp` locally. The first time you run `npm install`, it may take a few minutes to compile the binaries.
 
-Run the following command to generate your `.exe`:
+## 3. Installation
+
+```bash
+npm install
+```
+
+## 4. Building the Executable
 
 ```bash
 npm run dist
 ```
 
-This will create a `dist/` folder containing `SecureChat Setup.exe` (or an unpacked executable). Users can install it, then navigate to the installation folder's `resources/models` directory to drop in their `.gguf` files.
+This will produce an executable in the `dist/` folder.
+
+## 5. Post-Build Setup (The SCIF Step)
+
+1.  Take the generated folder (e.g., `dist/win-unpacked`).
+2.  Go to `resources/models`.
+3.  Drop your `.gguf` files (e.g., Llama-3-8B.gguf) into this folder.
+4.  Zip the folder and move it to your secure environment.
+5.  Run `Airlock UI.exe`.
+
+## Troubleshooting
+
+*   **"Inference engine not loaded"**: Ensure you ran `npm install` successfully and that `node-llama-cpp` compiled without errors.
+*   **"Scanning models..." forever**: Ensure the `models` folder exists in `resources/models` relative to the executable.
